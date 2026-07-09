@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const API = '';
 
@@ -76,8 +76,175 @@ const ClipboardIcon = ({ size = 20, color = 'currentColor', className }) => (
   </svg>
 );
 
+// Map Component for Location (Driver & Manager)
+function LocationMap({ driverLat, driverLng, branchLat, branchLng, branchName, height = 200 }) {
+  const mapRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.L || !containerRef.current) return;
+
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    const L = window.L;
+    const center = [(driverLat + branchLat) / 2, (driverLng + branchLng) / 2];
+
+    const map = L.map(containerRef.current, {
+      center: center,
+      zoom: 15,
+      zoomControl: false
+    });
+    mapRef.current = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    // Branch Marker
+    L.marker([branchLat, branchLng], {
+      icon: L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: #18181b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.2)">🏢</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      })
+    }).addTo(map).bindPopup(`<b>${branchName}</b>`);
+
+    // Driver Marker
+    L.marker([driverLat, driverLng], {
+      icon: L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: #2563eb; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.2)">🚚</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      })
+    }).addTo(map).bindPopup('<b>Развозчик</b>');
+
+    const bounds = L.latLngBounds([[driverLat, driverLng], [branchLat, branchLng]]);
+    map.fitBounds(bounds, { padding: [30, 30] });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [driverLat, driverLng, branchLat, branchLng, branchName]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        height: height, 
+        width: '100%', 
+        borderRadius: 12, 
+        border: '1px solid #e4e4e7',
+        marginTop: 10,
+        overflow: 'hidden',
+        zIndex: 1
+      }} 
+    />
+  );
+}
+
+// Map Component for Director
+function DirectorMap({ branches, factory, deliveries, height = 300 }) {
+  const mapRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.L || !containerRef.current) return;
+
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    const L = window.L;
+
+    // Centered around first branch or Tashkent default
+    const center = branches[0] ? [branches[0].lat, branches[0].lng] : [41.311676, 69.292960];
+    const map = L.map(containerRef.current, {
+      center: center,
+      zoom: 12,
+      zoomControl: false
+    });
+    mapRef.current = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    // Factory Marker
+    if (factory) {
+      L.marker([factory.lat, factory.lng], {
+        icon: L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div style="background-color: #dc2626; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3)">🏭</div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        })
+      }).addTo(map).bindPopup(`<b>Фабрика</b><br/>${factory.address}`);
+    }
+
+    // Branch Markers
+    branches.forEach(b => {
+      L.marker([b.lat, b.lng], {
+        icon: L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div style="background-color: #18181b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.2)">🏢</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      }).addTo(map).bindPopup(`<b>${b.name}</b><br/>${b.address}`);
+    });
+
+    // Recent delivery checkpoints
+    deliveries.slice(0, 15).forEach(d => {
+      if (d.driver_lat && d.driver_lng) {
+        const statusColor = d.status === 'confirmed' ? '#16a34a' : d.status === 'rejected' ? '#dc2626' : '#d97706';
+        L.circleMarker([d.driver_lat, d.driver_lng], {
+          radius: 6,
+          fillColor: statusColor,
+          color: '#fff',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.8
+        }).addTo(map).bindPopup(`<b>${d.driver_name}</b> -> ${d.branch_name}<br/>Статус: ${d.status}<br/>Время: ${d.created_at}`);
+      }
+    });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [branches, factory, deliveries]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        height: height, 
+        width: '100%', 
+        borderRadius: 14, 
+        border: '1px solid #e4e4e7',
+        marginBottom: 20,
+        overflow: 'hidden',
+        zIndex: 1
+      }} 
+    />
+  );
+}
+
 export default function Home() {
   const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState('driver');
+  const [userBranchId, setUserBranchId] = useState(null);
   const [branches, setBranches] = useState([]);
   const [factory, setFactory] = useState(null);
   const [driverInfo, setDriverInfo] = useState(null);
@@ -91,6 +258,53 @@ export default function Home() {
   const [deliveries, setDeliveries] = useState([]);
   const [tab, setTab] = useState('deliver');
 
+  // Role and Debugging states
+  const [simulatedUser, setSimulatedUser] = useState('');
+  const [activeOverrideRole, setActiveOverrideRole] = useState('director');
+  const [overrideBranchId, setOverrideBranchId] = useState(0);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
+  
+  // PIN Code Validation States
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinValue, setPinValue] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pendingAction, setPendingAction] = useState(null); // { type: 'simulate' | 'override', value: any }
+
+  // Director access list & management
+  const [directorTab, setDirectorTab] = useState('activity');
+  const [accessList, setAccessList] = useState([]);
+  const [formTgId, setFormTgId] = useState('');
+  const [formTgUsername, setFormTgUsername] = useState('');
+  const [formRole, setFormRole] = useState('manager');
+  const [formBranchId, setFormBranchId] = useState(0);
+
+  // Dashboard logs
+  const [directorStats, setDirectorStats] = useState({ confirmed: 0, rejected: 0, pending: 0, total: 0 });
+  const [directorDeliveries, setDirectorDeliveries] = useState([]);
+  const [managerDeliveries, setManagerDeliveries] = useState([]);
+
+  const isTelegram = typeof window !== 'undefined' && window.Telegram?.WebApp && window.Telegram.WebApp.initData;
+
+  // Load Leaflet resources dynamically
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.L) {
+      setLeafletLoaded(true);
+      return;
+    }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => setLeafletLoaded(true);
+    document.head.appendChild(script);
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       const w = window.Telegram.WebApp;
@@ -102,12 +316,40 @@ export default function Home() {
     }
   }, []);
 
+  // Fetch branches
   useEffect(() => {
     fetch(`${API}/api/branches`, { method: 'POST' })
       .then(r => r.json())
-      .then(d => { setBranches(d.branches || []); setFactory(d.factory); setDriverInfo(d.driver); })
+      .then(d => { 
+        setBranches(d.branches || []); 
+        setFactory(d.factory); 
+        setDriverInfo(d.driver);
+        if (d.factory) setOverrideBranchId(d.factory.id);
+      })
       .catch(() => {});
   }, []);
+
+  // Determine user role and branch from Database
+  useEffect(() => {
+    const u = user?.username || '';
+    const tid = user?.id || '';
+    fetch(`${API}/api/get-user-role`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegram_id: tid, username: u })
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        setUserRole(d.role);
+        setUserBranchId(d.branch_id);
+        if (d.role === 'director') {
+          setActiveOverrideRole('director');
+        }
+      }
+    })
+    .catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     if (!navigator.geolocation) { setLocError('Геолокация не поддерживается'); return; }
@@ -119,16 +361,91 @@ export default function Home() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  // Resolve active role and active branch
+  let activeRole = userRole;
+  let activeBranchId = userBranchId;
+
+  if (userRole === 'director') {
+    if (activeOverrideRole === 'driver') {
+      activeRole = 'driver';
+      activeBranchId = null;
+    } else if (activeOverrideRole === 'manager') {
+      activeRole = 'manager';
+      activeBranchId = overrideBranchId !== null ? overrideBranchId : (factory?.id || 0);
+    } else {
+      activeRole = 'director';
+      activeBranchId = null;
+    }
+  }
+
+  // Load Driver History
   const loadHistory = useCallback(() => {
     const id = user?.id || 0;
-    if (!id) return;
+    if (!id && !simulatedUser) return;
     fetch(`${API}/api/my-deliveries`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ driver_id: id }),
+      body: JSON.stringify({ driver_id: id || 123456 }),
     }).then(r => r.json()).then(d => setDeliveries(d.deliveries || [])).catch(() => {});
+  }, [user, simulatedUser]);
+
+  // Load Manager History and Pending Deliveries
+  const loadBranchHistory = useCallback(() => {
+    if (activeBranchId === null) return;
+    fetch(`${API}/api/branch-deliveries`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch_id: activeBranchId }),
+    }).then(r => r.json()).then(d => setManagerDeliveries(d.deliveries || [])).catch(() => {});
+  }, [activeBranchId]);
+
+  // Load Director Dashboard Statistics
+  const loadDirectorStats = useCallback(() => {
+    fetch(`${API}/api/all-deliveries`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user?.username || 'grxt777' }),
+    }).then(r => r.json()).then(d => {
+      if (d.ok) {
+        setDirectorStats(d.stats);
+        setDirectorDeliveries(d.deliveries || []);
+      }
+    }).catch(() => {});
   }, [user]);
 
-  useEffect(() => { if (tab === 'history') loadHistory(); }, [tab, loadHistory]);
+  // Load Director Access List
+  const loadAccessList = useCallback(() => {
+    fetch(`${API}/api/get-access-list`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user?.username || 'grxt777' })
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) setAccessList(d.accessList || []);
+    })
+    .catch(() => {});
+  }, [user]);
+
+  // Fetch triggers
+  useEffect(() => { 
+    if (tab === 'history' && activeRole === 'driver') loadHistory(); 
+  }, [tab, activeRole, loadHistory]);
+
+  useEffect(() => { 
+    if (activeRole === 'manager' && activeBranchId !== null) loadBranchHistory(); 
+  }, [activeRole, activeBranchId, loadBranchHistory]);
+
+  useEffect(() => { 
+    if (activeRole === 'director') {
+      loadDirectorStats();
+      const interval = setInterval(loadDirectorStats, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [activeRole, loadDirectorStats]);
+
+  useEffect(() => {
+    if (activeRole === 'director' && directorTab === 'access') {
+      loadAccessList();
+    }
+  }, [activeRole, directorTab, loadAccessList]);
 
   const submit = async (type, branchId) => {
     if (!location) return;
@@ -137,7 +454,7 @@ export default function Home() {
       const r = await fetch(`${API}/api/deliver`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          driver_id: user?.id || 0,
+          driver_id: user?.id || 123456,
           driver_name: user?.first_name || user?.username || 'Развозчик',
           branch_id: branchId, lat: location.lat, lng: location.lng, type,
         }),
@@ -147,6 +464,124 @@ export default function Home() {
       else setError(d.message || d.error || 'Ошибка');
     } catch { setError('Ошибка соединения'); }
     setLoading(false);
+  };
+
+  const handleConfirm = async (deliveryId, status) => {
+    setActionLoading(deliveryId);
+    try {
+      const managerId = user?.id || 9999;
+      const managerName = user?.first_name || user?.username || 'Управляющий';
+      const r = await fetch(`${API}/api/confirm-delivery`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delivery_id: deliveryId, status, manager_id: managerId, manager_name: managerName }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        loadBranchHistory();
+        if (userRole === 'director') loadDirectorStats();
+      } else {
+        alert(d.error || 'Ошибка');
+      }
+    } catch {
+      alert('Ошибка соединения');
+    }
+    setActionLoading(null);
+  };
+
+  // PIN verification handlers
+  const requestSimulateChange = (val) => {
+    setPendingAction({ type: 'simulate', value: val });
+    setPinValue('');
+    setPinError('');
+    setPinModalOpen(true);
+  };
+
+  const requestOverrideChange = (val) => {
+    setPendingAction({ type: 'override', value: val });
+    setPinValue('');
+    setPinError('');
+    setPinModalOpen(true);
+  };
+
+  const handlePinSubmit = (val) => {
+    if (val === '718964') {
+      if (pendingAction.type === 'simulate') {
+        const simVal = pendingAction.value;
+        setSimulatedUser(simVal);
+        if (simVal) {
+          setUser({ username: simVal, first_name: `Тест (${simVal})`, id: 123456 });
+        } else {
+          setUser(null);
+        }
+      } else if (pendingAction.type === 'override') {
+        const overVal = pendingAction.value;
+        if (overVal.startsWith('manager_')) {
+          const bId = Number(overVal.split('_')[1]);
+          setActiveOverrideRole('manager');
+          setOverrideBranchId(bId);
+        } else {
+          setActiveOverrideRole(overVal);
+          if (overVal === 'manager') setOverrideBranchId(factory?.id || 0);
+        }
+      }
+      setPinModalOpen(false);
+    } else {
+      setPinError('Неверный PIN-код!');
+    }
+  };
+
+  const cancelPinModal = () => {
+    setPinModalOpen(false);
+    setPendingAction(null);
+  };
+
+  // Access management handlers
+  const handleGrantAccess = async (e) => {
+    e.preventDefault();
+    if (!formTgId) return;
+    try {
+      const r = await fetch(`${API}/api/grant-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user?.username || 'grxt777',
+          telegram_id: Number(formTgId),
+          telegram_username: formTgUsername || null,
+          role: formRole,
+          branch_id: formRole === 'manager' ? Number(formBranchId) : null
+        })
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setFormTgId('');
+        setFormTgUsername('');
+        loadAccessList();
+      } else {
+        alert(d.error || 'Ошибка');
+      }
+    } catch {
+      alert('Ошибка соединения');
+    }
+  };
+
+  const handleRevokeAccess = async (tgId) => {
+    if (!confirm('Вы уверены, что хотите удалить доступ?')) return;
+    try {
+      const r = await fetch(`${API}/api/revoke-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user?.username || 'grxt777',
+          telegram_id: tgId
+        })
+      });
+      const d = await r.json();
+      if (d.ok) {
+        loadAccessList();
+      }
+    } catch {
+      alert('Ошибка соединения');
+    }
   };
 
   const reset = () => { setStep('choose'); setSelectedBranch(null); setResult(null); setError(''); };
@@ -175,126 +610,372 @@ export default function Home() {
     }
   };
 
+  const managerActiveBranch = branches.find(b => b.id === activeBranchId) || 
+                              (factory?.id === activeBranchId ? factory : null);
+
   return (
     <main style={c.container}>
+      {/* 1. Local Debugging Simulator (Only visible outside Telegram) */}
+      {!isTelegram && (
+        <div style={c.debugBar}>
+          <div style={{ fontWeight: 600, fontSize: 12, color: '#4b5563' }}>🛠️ Отладка:</div>
+          <select 
+            value={simulatedUser}
+            onChange={(e) => requestSimulateChange(e.target.value)}
+            style={c.debugSelect}
+          >
+            <option value="">Развозчик (по умолчанию)</option>
+            <option value="grxt777">👑 Директор (grxt777)</option>
+            {factory && (
+              <option value={factory.manager_username}>🏭 Управ: {factory.name} ({factory.manager_username})</option>
+            )}
+            {branches.map(b => (
+              <option key={b.id} value={b.manager_username}>🏢 Управ: {b.name} ({b.manager_username})</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* 2. Director View Overrides Switcher */}
+      {userRole === 'director' && (
+        <div style={c.switcherContainer}>
+          <div style={c.switcherLabel}>Режим просмотра:</div>
+          <select 
+            style={c.switcherSelect}
+            value={activeOverrideRole === 'manager' ? `manager_${overrideBranchId}` : activeOverrideRole}
+            onChange={(e) => requestOverrideChange(e.target.value)}
+          >
+            <option value="director">👑 Панель Директора</option>
+            <option value="driver">🚚 Режим Развозчика</option>
+            <optgroup label="Режим Управляющего">
+              {factory && (
+                <option value={`manager_${factory.id}`}>🏭 {factory.name} (Управ)</option>
+              )}
+              {branches.map(b => (
+                <option key={b.id} value={`manager_${b.id}`}>🏢 {b.name} (Управ)</option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+      )}
+
+      {/* 3. PIN Verification Modal */}
+      {pinModalOpen && (
+        <div style={c.modalOverlay}>
+          <div style={c.modal}>
+            <div style={c.modalTitle}>Подтверждение доступа</div>
+            <div style={c.modalSub}>Введите 6-значный PIN-код директора для смены интерфейса:</div>
+            <input 
+              type="password"
+              maxLength={6}
+              value={pinValue}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '');
+                setPinValue(val);
+                if (val.length === 6) {
+                  handlePinSubmit(val);
+                }
+              }}
+              placeholder="••••••"
+              style={c.pinInput}
+              autoFocus
+            />
+            {pinError && <div style={c.pinError}>{pinError}</div>}
+            <div style={c.modalActions}>
+              <button style={c.btnCancel} onClick={cancelPinModal}>Отмена</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <div style={c.header}>
         <div style={c.headerTitleContainer}>
-          <TruckIcon size={22} style={c.headerTitleIcon} />
-          <div style={c.headerTitle}>Трекер доставок</div>
+          {activeRole === 'director' ? (
+            <ClipboardIcon size={22} style={c.headerTitleIcon} />
+          ) : activeRole === 'manager' ? (
+            <PackageIcon size={22} style={c.headerTitleIcon} />
+          ) : (
+            <TruckIcon size={22} style={c.headerTitleIcon} />
+          )}
+          <div style={c.headerTitle}>
+            {activeRole === 'director' ? 'Панель Директора' : activeRole === 'manager' ? 'Панель Управляющего' : 'Трекер доставок'}
+          </div>
         </div>
-        <div style={c.headerSub}>{user ? user.first_name || user.username : driverInfo?.name || 'Развозчик'}</div>
-      </div>
-
-      <div style={c.tabsContainer}>
-        <div style={c.tabs}>
-          <button style={tab === 'deliver' ? c.tabActive : c.tab} onClick={() => { setTab('deliver'); reset(); }}>
-            <PackageIcon size={16} />
-            <span>Доставка</span>
-          </button>
-          <button style={tab === 'history' ? c.tabActive : c.tab} onClick={() => setTab('history')}>
-            <HistoryIcon size={16} />
-            <span>История</span>
-          </button>
+        <div style={c.headerSub}>
+          {activeRole === 'manager' && managerActiveBranch ? `${managerActiveBranch.name} · ` : ''}
+          {user ? user.first_name || user.username : driverInfo?.name || 'Развозчик'}
         </div>
       </div>
 
-      {tab === 'deliver' ? (
+      {/* RENDER VIEW ACCORDING TO ROLE */}
+
+      {/* ─────────────────── DIRECTOR ROLE ─────────────────── */}
+      {activeRole === 'director' && (
         <div style={c.content}>
-          <div style={location ? c.locOk : c.locBad}>
-            <PinIcon size={15} />
-            <span>{location ? 'Геолокация активна' : (locError || 'Определяем геопозицию...')}</span>
+          {/* Sub tabs */}
+          <div style={c.dirTabs}>
+            <button 
+              style={directorTab === 'activity' ? c.dirTabActive : c.dirTab}
+              onClick={() => setDirectorTab('activity')}
+            >
+              Активность
+              {directorTab === 'activity' && <span style={c.dirTabIndicator} />}
+            </button>
+            <button 
+              style={directorTab === 'access' ? c.dirTabActive : c.dirTab}
+              onClick={() => setDirectorTab('access')}
+            >
+              Доступ
+              {directorTab === 'access' && <span style={c.dirTabIndicator} />}
+            </button>
           </div>
 
-          {step === 'choose' && (
+          {directorTab === 'activity' ? (
             <>
-              <div style={c.label}>Выберите действие</div>
-              <div style={c.btnStack}>
-                <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => submit('pickup', 0)}>
-                  <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
-                    <PackageIcon size={20} />
-                  </div>
-                  <span style={c.bigBtnTitle}>Забрал с фабрики</span>
-                  <span style={c.bigSub}>{factory?.name} · {factory?.address}</span>
-                </button>
-                <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => setStep('deliver')}>
-                  <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
-                    <TruckIcon size={20} />
-                  </div>
-                  <span style={c.bigBtnTitle}>Доставка на филиал</span>
-                  <span style={c.bigSub}>Выберите филиал назначения</span>
-                </button>
+              {/* Stats Cards */}
+              <div style={c.statsContainer}>
+                <div style={c.statCard}>
+                  <div style={c.statVal}>{directorStats.total}</div>
+                  <div style={c.statLbl}>Всего за день</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #16a34a' }}>
+                  <div style={{ ...c.statVal, color: '#16a34a' }}>{directorStats.confirmed}</div>
+                  <div style={c.statLbl}>Подтверждено</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #d97706' }}>
+                  <div style={{ ...c.statVal, color: '#d97706' }}>{directorStats.pending}</div>
+                  <div style={c.statLbl}>Ожидает</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #dc2626' }}>
+                  <div style={{ ...c.statVal, color: '#dc2626' }}>{directorStats.rejected}</div>
+                  <div style={c.statLbl}>Отклонено</div>
+                </div>
               </div>
-            </>
-          )}
 
-          {step === 'deliver' && (
+              {/* Director Map */}
+              {leafletLoaded && (
+                <>
+                  <div style={c.label}>Карта активности филиалов</div>
+                  <DirectorMap 
+                    branches={branches} 
+                    factory={factory} 
+                    deliveries={directorDeliveries} 
+                  />
+                </>
+              )}
+
+              {/* All Deliveries History */}
+              <div style={c.label}>Последние 100 событий</div>
+              {directorDeliveries.length === 0 ? (
+                <div style={c.empty}>Нет событий сегодня</div>
+              ) : (
+                <div style={c.histList}>
+                  {directorDeliveries.map(d => {
+                    const status = statusStyles[d.status] || statusStyles.pending;
+                    return (
+                      <div key={d.id} style={c.histCard}>
+                        <div style={c.histTop}>
+                          <span style={c.histTypeIcon}>
+                            {d.type === 'pickup' ? <PackageIcon size={14} /> : <TruckIcon size={14} />}
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#4b5563' }}>
+                              👤 {d.driver_name}
+                            </span>
+                            <span style={{ 
+                              ...c.histStatusContainer, 
+                              color: status.color,
+                              background: status.bg,
+                              border: `1px solid ${status.border}`
+                            }}>
+                              {status.icon(12)}
+                              <span>{status.label}</span>
+                            </span>
+                          </div>
+                        </div>
+                        <div style={c.histBr}>{d.branch_name}</div>
+                        <div style={c.histMeta}>
+                          <div style={c.histMetaItem}>
+                            <ClockIcon size={12} />
+                            <span>{d.created_at}</span>
+                          </div>
+                          <div style={c.histMetaItem}>
+                            <NavigationIcon size={12} />
+                            <span>{d.distance} м</span>
+                          </div>
+                          {d.confirmed_by_name && (
+                            <div style={c.histMetaItem}>
+                              <span>🧑‍💼 {d.confirmed_by_name}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
             <>
-              <div style={c.label}>Выберите филиал</div>
-              <div style={c.branchList}>
-                {branches.map(b => (
-                  <button key={b.id} style={selectedBranch === b.id ? c.brA : c.br}
-                    onClick={() => setSelectedBranch(b.id)}>
-                    <div style={c.brName}>{b.name}</div>
-                    <div style={c.brAddr}>{b.address}</div>
-                  </button>
-                ))}
-              </div>
-              <button style={selectedBranch && !loading ? c.submit : c.submitOff}
-                disabled={!selectedBranch || loading}
-                onClick={() => selectedBranch && submit('delivery', selectedBranch)}>
-                {loading ? 'Отправка...' : (
-                  <>
-                    <CheckIcon size={16} />
-                    <span>Подтвердить доставку</span>
-                  </>
+              {/* Access management */}
+              <div style={c.label}>Выдать доступ</div>
+              <form onSubmit={handleGrantAccess} style={c.accessForm}>
+                <div style={c.formRow}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#71717a' }}>Telegram User ID (только цифры)</label>
+                  <input 
+                    type="number"
+                    required
+                    placeholder="Пример: 123456789"
+                    value={formTgId}
+                    onChange={(e) => setFormTgId(e.target.value)}
+                    style={c.formInput}
+                  />
+                </div>
+                <div style={c.formRow}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#71717a' }}>Telegram Username (опционально)</label>
+                  <input 
+                    type="text"
+                    placeholder="Пример: ivan_delivery"
+                    value={formTgUsername}
+                    onChange={(e) => setFormTgUsername(e.target.value)}
+                    style={c.formInput}
+                  />
+                </div>
+                <div style={c.formRow}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#71717a' }}>Роль доступа</label>
+                  <select 
+                    value={formRole} 
+                    onChange={(e) => setFormRole(e.target.value)} 
+                    style={c.formSelect}
+                  >
+                    <option value="manager">🏢 Управляющий (Manager)</option>
+                    <option value="director">👑 Директор (Director)</option>
+                    <option value="driver">🚚 Развозчик (Driver)</option>
+                  </select>
+                </div>
+                {formRole === 'manager' && (
+                  <div style={c.formRow}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#71717a' }}>Управляемый филиал</label>
+                    <select 
+                      value={formBranchId} 
+                      onChange={(e) => setFormBranchId(Number(e.target.value))} 
+                      style={c.formSelect}
+                    >
+                      {factory && <option value={factory.id}>🏭 {factory.name}</option>}
+                      {branches.map(b => (
+                        <option key={b.id} value={b.id}>🏢 {b.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
-              </button>
-              <button style={c.back} onClick={reset}>
-                <ArrowLeftIcon size={16} />
-                <span>Назад</span>
-              </button>
+                <button type="submit" style={c.formBtn}>Выдать права доступа</button>
+              </form>
+
+              <div style={c.label}>Пользователи с настроенным доступом</div>
+              {accessList.length === 0 ? (
+                <div style={c.empty}>Список пуст</div>
+              ) : (
+                <div style={c.accessList}>
+                  {accessList.map(item => {
+                    const br = branches.find(b => b.id === item.branch_id) || (factory?.id === item.branch_id ? factory : null);
+                    return (
+                      <div key={item.telegram_id} style={c.accessCard}>
+                        <div style={c.accessDetails}>
+                          <span style={c.accessTg}>
+                            🆔 {item.telegram_id} {item.telegram_username ? `(@${item.telegram_username})` : ''}
+                          </span>
+                          <span style={c.accessRole}>
+                            Роль: {item.role === 'director' ? '👑 Директор' : item.role === 'manager' ? `🏢 Управляющий (${br?.name || 'Филиал'})` : '🚚 Развозчик'}
+                          </span>
+                        </div>
+                        <button style={c.btnRevoke} onClick={() => handleRevokeAccess(item.telegram_id)}>Удалить</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
-          )}
-
-          {step === 'done' && result && (
-            <div style={c.resOk}>
-              <div style={c.resOkIcon}>
-                <CheckIcon size={22} color="#16a34a" />
-              </div>
-              <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>Отправлено!</div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>{result.branch_name}</div>
-              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 1 }}>{result.distance} м от точки</div>
-              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 12, lineHeight: 1.4 }}>Ожидайте подтверждения управляющего</div>
-              <button style={c.again} onClick={reset}>Новая доставка</button>
-            </div>
-          )}
-
-          {error && (
-            <div style={c.resErr}>
-              <div style={c.resErrIcon}>
-                <CloseIcon size={22} color="#dc2626" />
-              </div>
-              <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.4 }}>{error}</div>
-              <button style={c.againR} onClick={() => setError('')}>Понятно</button>
-            </div>
           )}
         </div>
-      ) : (
+      )}
+
+      {/* ─────────────────── MANAGER ROLE ─────────────────── */}
+      {activeRole === 'manager' && (
         <div style={c.content}>
-          {deliveries.length === 0 ? (
-            <div style={c.empty}>
-              <ClipboardIcon size={28} style={{ marginBottom: 4 }} />
-              <div>Нет доставок</div>
-            </div>
+          {/* List Pending */}
+          {(() => {
+            const pending = managerDeliveries.filter(d => d.status === 'pending');
+            return pending.length > 0 ? (
+              <div style={c.pendingSection}>
+                <div style={c.label}>Ожидает подтверждения:</div>
+                {pending.map(d => (
+                  <div key={d.id} style={c.pendingCard}>
+                    <div style={c.pendingHeader}>
+                      <span style={c.pendingDriver}>
+                        <TruckIcon size={14} /> {d.driver_name}
+                      </span>
+                      <span style={c.pendingType}>
+                        {d.type === 'pickup' ? 'Забор' : 'Доставка'}
+                      </span>
+                    </div>
+                    <div style={c.pendingTime}>Отправлено: {d.created_at}</div>
+
+                    {/* Verification Map */}
+                    {leafletLoaded && d.driver_lat && d.driver_lng && managerActiveBranch && (
+                      <LocationMap 
+                        driverLat={d.driver_lat}
+                        driverLng={d.driver_lng}
+                        branchLat={managerActiveBranch.lat}
+                        branchLng={managerActiveBranch.lng}
+                        branchName={managerActiveBranch.name}
+                        height={180}
+                      />
+                    )}
+
+                    <div style={c.pendingDistance}>
+                      📍 Дистанция: <strong>{d.distance} м</strong> от точки 
+                      {d.distance > 300 && (
+                        <span style={{ color: '#dc2626', marginLeft: 6, fontWeight: 700 }}>(Вне радиуса 300м!)</span>
+                      )}
+                    </div>
+
+                    {actionLoading === d.id ? (
+                      <div style={c.actionLoading}>Обработка...</div>
+                    ) : (
+                      <div style={c.pendingActions}>
+                        <button style={c.btnConfirm} onClick={() => handleConfirm(d.id, 'confirmed')}>
+                          <CheckIcon size={16} /> Принять
+                        </button>
+                        <button style={c.btnReject} onClick={() => handleConfirm(d.id, 'rejected')}>
+                          <CloseIcon size={16} /> Отклонить
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={c.noPendingCard}>
+                <CheckIcon size={24} color="#16a34a" />
+                <span>Нет ожидающих доставок для вашего филиала</span>
+              </div>
+            );
+          })()}
+
+          {/* History */}
+          <div style={c.label}>История филиала</div>
+          {managerDeliveries.filter(d => d.status !== 'pending').length === 0 ? (
+            <div style={c.empty}>История пуста</div>
           ) : (
             <div style={c.histList}>
-              {deliveries.map(d => {
+              {managerDeliveries.filter(d => d.status !== 'pending').map(d => {
                 const status = statusStyles[d.status] || statusStyles.pending;
                 return (
                   <div key={d.id} style={c.histCard}>
                     <div style={c.histTop}>
                       <span style={c.histTypeIcon}>
-                        {d.type === 'pickup' ? <PackageIcon size={15} /> : <TruckIcon size={15} />}
+                        {d.type === 'pickup' ? <PackageIcon size={14} /> : <TruckIcon size={14} />}
                       </span>
                       <span style={{ 
                         ...c.histStatusContainer, 
@@ -306,7 +987,7 @@ export default function Home() {
                         <span>{status.label}</span>
                       </span>
                     </div>
-                    <div style={c.histBr}>{d.branch_name}</div>
+                    <div style={c.histBr}>{d.driver_name}</div>
                     <div style={c.histMeta}>
                       <div style={c.histMetaItem}>
                         <ClockIcon size={12} />
@@ -316,6 +997,11 @@ export default function Home() {
                         <NavigationIcon size={12} />
                         <span>{d.distance} м</span>
                       </div>
+                      {d.confirmed_by_name && (
+                        <div style={c.histMetaItem}>
+                          <span>🧑‍💼 {d.confirmed_by_name}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -323,6 +1009,173 @@ export default function Home() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ─────────────────── DRIVER ROLE ─────────────────── */}
+      {activeRole === 'driver' && (
+        <>
+          <div style={c.tabsContainer}>
+            <div style={c.tabs}>
+              <button style={tab === 'deliver' ? c.tabActive : c.tab} onClick={() => { setTab('deliver'); reset(); }}>
+                <PackageIcon size={16} />
+                <span>Доставка</span>
+              </button>
+              <button style={tab === 'history' ? c.tabActive : c.tab} onClick={() => setTab('history')}>
+                <HistoryIcon size={16} />
+                <span>История</span>
+              </button>
+            </div>
+          </div>
+
+          {tab === 'deliver' ? (
+            <div style={c.content}>
+              <div style={location ? c.locOk : c.locBad}>
+                <PinIcon size={15} />
+                <span>{location ? 'Геолокация активна' : (locError || 'Определяем геопозицию...')}</span>
+              </div>
+
+              {step === 'choose' && (
+                <>
+                  <div style={c.label}>Выберите действие</div>
+                  <div style={c.btnStack}>
+                    <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => submit('pickup', 0)}>
+                      <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
+                        <PackageIcon size={20} />
+                      </div>
+                      <span style={c.bigBtnTitle}>Забрал с фабрики</span>
+                      <span style={c.bigSub}>{factory?.name} · {factory?.address}</span>
+                    </button>
+                    <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => setStep('deliver')}>
+                      <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
+                        <TruckIcon size={20} />
+                      </div>
+                      <span style={c.bigBtnTitle}>Доставка на филиал</span>
+                      <span style={c.bigSub}>Выберите филиал назначения</span>
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {step === 'deliver' && (
+                <>
+                  <div style={c.label}>Выберите филиал</div>
+                  <div style={c.branchList}>
+                    {branches.map(b => (
+                      <button key={b.id} style={selectedBranch === b.id ? c.brA : c.br}
+                        onClick={() => setSelectedBranch(b.id)}>
+                        <div style={c.brName}>{b.name}</div>
+                        <div style={c.brAddr}>{b.address}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Driver Visual Map to guide positioning */}
+                  {leafletLoaded && location && selectedBranch && (
+                    (() => {
+                      const b = branches.find(x => x.id === selectedBranch);
+                      if (!b) return null;
+                      return (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={c.label}>Карта филиала и вашего положения:</div>
+                          <LocationMap 
+                            driverLat={location.lat}
+                            driverLng={location.lng}
+                            branchLat={b.lat}
+                            branchLng={b.lng}
+                            branchName={b.name}
+                            height={180}
+                          />
+                        </div>
+                      );
+                    })()
+                  )}
+
+                  <button style={selectedBranch && !loading ? c.submit : c.submitOff}
+                    disabled={!selectedBranch || loading}
+                    onClick={() => selectedBranch && submit('delivery', selectedBranch)}>
+                    {loading ? 'Отправка...' : (
+                      <>
+                        <CheckIcon size={16} />
+                        <span>Подтвердить доставку</span>
+                      </>
+                    )}
+                  </button>
+                  <button style={c.back} onClick={reset}>
+                    <ArrowLeftIcon size={16} />
+                    <span>Назад</span>
+                  </button>
+                </>
+              )}
+
+              {step === 'done' && result && (
+                <div style={c.resOk}>
+                  <div style={c.resOkIcon}>
+                    <CheckIcon size={22} color="#16a34a" />
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>Отправлено!</div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{result.branch_name}</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginTop: 1 }}>{result.distance} м от точки</div>
+                  <div style={{ fontSize: 12, opacity: 0.6, marginTop: 12, lineHeight: 1.4 }}>Ожидайте подтверждения управляющего</div>
+                  <button style={c.again} onClick={reset}>Новая доставка</button>
+                </div>
+              )}
+
+              {error && (
+                <div style={c.resErr}>
+                  <div style={c.resErrIcon}>
+                    <CloseIcon size={22} color="#dc2626" />
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.4 }}>{error}</div>
+                  <button style={c.againR} onClick={() => setError('')}>Понятно</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={c.content}>
+              {deliveries.length === 0 ? (
+                <div style={c.empty}>
+                  <ClipboardIcon size={28} style={{ marginBottom: 4 }} />
+                  <div>Нет доставок</div>
+                </div>
+              ) : (
+                <div style={c.histList}>
+                  {deliveries.map(d => {
+                    const status = statusStyles[d.status] || statusStyles.pending;
+                    return (
+                      <div key={d.id} style={c.histCard}>
+                        <div style={c.histTop}>
+                          <span style={c.histTypeIcon}>
+                            {d.type === 'pickup' ? <PackageIcon size={15} /> : <TruckIcon size={15} />}
+                          </span>
+                          <span style={{ 
+                            ...c.histStatusContainer, 
+                            color: status.color,
+                            background: status.bg,
+                            border: `1px solid ${status.border}`
+                          }}>
+                            {status.icon(12)}
+                            <span>{status.label}</span>
+                          </span>
+                        </div>
+                        <div style={c.histBr}>{d.branch_name}</div>
+                        <div style={c.histMeta}>
+                          <div style={c.histMetaItem}>
+                            <ClockIcon size={12} />
+                            <span>{d.created_at}</span>
+                          </div>
+                          <div style={c.histMetaItem}>
+                            <NavigationIcon size={12} />
+                            <span>{d.distance} м</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </main>
   );
@@ -335,6 +1188,49 @@ const c = {
     color: '#18181b', 
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', 
     paddingBottom: 40 
+  },
+  debugBar: {
+    background: '#f4f4f5',
+    borderBottom: '1px solid #e4e4e7',
+    padding: '8px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  debugSelect: {
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: '1px solid #d4d4d8',
+    background: '#ffffff',
+    fontSize: 12,
+    fontWeight: 500,
+    outline: 'none',
+  },
+  switcherContainer: {
+    padding: '12px 20px',
+    background: '#ffffff',
+    borderBottom: '1px solid #f4f4f5',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  switcherLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#71717a',
+  },
+  switcherSelect: {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    fontSize: 13,
+    fontWeight: 600,
+    outline: 'none',
+    cursor: 'pointer',
+    color: '#18181b',
   },
   header: { 
     padding: '24px 20px 16px', 
@@ -670,7 +1566,7 @@ const c = {
   empty: { 
     textAlign: 'center', 
     color: '#71717a', 
-    padding: '60px 20px', 
+    padding: '40px 20px', 
     fontSize: 14,
     display: 'flex',
     flexDirection: 'column',
@@ -718,6 +1614,7 @@ const c = {
   },
   histMeta: { 
     display: 'flex', 
+    flexWrap: 'wrap',
     gap: 12,
     fontSize: 12, 
     color: '#71717a',
@@ -729,5 +1626,328 @@ const c = {
     display: 'flex',
     alignItems: 'center',
     gap: 4
+  },
+  // Manager-specific confirmation styling
+  pendingSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 24,
+  },
+  pendingCard: {
+    padding: '18px 16px',
+    borderRadius: 14,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.01)',
+  },
+  pendingHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  pendingDriver: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#18181b',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pendingType: {
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    color: '#71717a',
+    letterSpacing: '0.5px',
+    background: '#f4f4f5',
+    padding: '3px 8px',
+    borderRadius: 6,
+  },
+  pendingTime: {
+    fontSize: 12,
+    color: '#71717a',
+    marginBottom: 10,
+  },
+  pendingDistance: {
+    fontSize: 13,
+    color: '#18181b',
+    marginTop: 10,
+    marginBottom: 14,
+  },
+  pendingActions: {
+    display: 'flex',
+    gap: 10,
+  },
+  btnConfirm: {
+    flex: 1,
+    padding: '10px 16px',
+    borderRadius: 10,
+    border: 'none',
+    background: '#16a34a',
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    transition: 'background 0.2s ease',
+  },
+  btnReject: {
+    flex: 1,
+    padding: '10px 16px',
+    borderRadius: 10,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    color: '#dc2626',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    transition: 'background 0.2s ease',
+  },
+  noPendingCard: {
+    padding: '24px',
+    borderRadius: 14,
+    background: '#f8fafc',
+    border: '1px dashed #cbd5e1',
+    color: '#475569',
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 500,
+    marginBottom: 20,
+  },
+  // Director-specific styling
+  statsContainer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: 10,
+    marginBottom: 20,
+  },
+  statCard: {
+    padding: '14px 16px',
+    borderRadius: 12,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  statVal: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: '#18181b',
+  },
+  statLbl: {
+    fontSize: 12,
+    color: '#71717a',
+    fontWeight: 500,
+  },
+  actionLoading: {
+    fontSize: 13,
+    color: '#71717a',
+    textAlign: 'center',
+    padding: 10,
+  },
+
+  // PIN verification modal styles
+  modalOverlay: {
+    position: 'fixed',
+    top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(0,0,0,0.4)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: 20
+  },
+  modal: {
+    background: '#ffffff',
+    padding: 24,
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 340,
+    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    alignItems: 'center',
+    textAlign: 'center'
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#18181b'
+  },
+  modalSub: {
+    fontSize: 13,
+    color: '#71717a',
+    lineHeight: 1.4
+  },
+  pinInput: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 10,
+    border: '1px solid #e4e4e7',
+    fontSize: 24,
+    textAlign: 'center',
+    letterSpacing: 8,
+    fontWeight: 700,
+    outline: 'none',
+    margin: '10px 0 4px',
+    background: '#fafafa'
+  },
+  pinError: {
+    fontSize: 12,
+    color: '#dc2626',
+    fontWeight: 600
+  },
+  modalActions: {
+    width: '100%',
+    display: 'flex',
+    gap: 8,
+    marginTop: 8
+  },
+  btnCancel: {
+    flex: 1,
+    padding: '10px 16px',
+    borderRadius: 10,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    color: '#71717a',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer'
+  },
+
+  // Access management tab styles
+  dirTabs: {
+    display: 'flex',
+    borderBottom: '1px solid #e4e4e7',
+    marginBottom: 20,
+    gap: 16
+  },
+  dirTab: {
+    padding: '10px 4px',
+    background: 'none',
+    border: 'none',
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#71717a',
+    cursor: 'pointer',
+    position: 'relative'
+  },
+  dirTabActive: {
+    padding: '10px 4px',
+    background: 'none',
+    border: 'none',
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#18181b',
+    cursor: 'pointer',
+    position: 'relative'
+  },
+  dirTabIndicator: {
+    position: 'absolute',
+    bottom: -1,
+    left: 0,
+    right: 0,
+    height: 2,
+    background: '#18181b'
+  },
+  accessForm: {
+    background: '#fafafa',
+    border: '1px solid #e4e4e7',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10
+  },
+  formRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    textAlign: 'left'
+  },
+  formInput: {
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid #e4e4e7',
+    fontSize: 13,
+    outline: 'none',
+    background: '#ffffff'
+  },
+  formSelect: {
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid #e4e4e7',
+    fontSize: 13,
+    outline: 'none',
+    background: '#ffffff',
+    cursor: 'pointer'
+  },
+  formBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    border: 'none',
+    background: '#18181b',
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    marginTop: 6
+  },
+  accessList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10
+  },
+  accessCard: {
+    padding: 12,
+    borderRadius: 10,
+    border: '1px solid #e4e4e7',
+    background: '#ffffff',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  accessDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+    textAlign: 'left'
+  },
+  accessTg: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#18181b'
+  },
+  accessRole: {
+    fontSize: 11,
+    color: '#71717a',
+    fontWeight: 500
+  },
+  btnRevoke: {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: '1px solid #fecaca',
+    background: '#fef2f2',
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer'
   }
 };

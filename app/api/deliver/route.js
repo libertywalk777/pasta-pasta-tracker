@@ -40,7 +40,7 @@ export async function POST(request) {
 
   const res = await db.execute(
     `INSERT INTO deliveries (driver_id, driver_name, type, branch_id, branch_name, status, driver_lat, driver_lng, distance, created_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?) RETURNING id`,
     [driver_id, driver_name || 'Развозчик', deliveryType, target.id, target.name, lat, lng, distance, now]
   );
 
