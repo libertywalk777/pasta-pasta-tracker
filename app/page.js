@@ -264,8 +264,17 @@ export default function Home() {
   const [overrideBranchId, setOverrideBranchId] = useState(0);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
-  
-  // PIN Code Validation States
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [matchedBy, setMatchedBy] = useState('');
+  const [roleLabel, setRoleLabel] = useState('');
+
+  // Phone-based auto role
+  const [userPhone, setUserPhone] = useState('');
+  const [phonePrompt, setPhonePrompt] = useState(false);
+  const [manualPhone, setManualPhone] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+
+  // PIN Code Validation States (director view override only)
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState('');
@@ -284,7 +293,10 @@ export default function Home() {
   const [directorDeliveries, setDirectorDeliveries] = useState([]);
   const [managerDeliveries, setManagerDeliveries] = useState([]);
 
-  const isTelegram = typeof window !== 'undefined' && window.Telegram?.WebApp && window.Telegram.WebApp.initData;
+  const isTelegram =
+    typeof window !== 'undefined' &&
+    !!window.Telegram?.WebApp &&
+    (!!window.Telegram.WebApp.initData || !!window.Telegram.WebApp.initDataUnsafe?.user);
 
   // Load Leaflet resources dynamically
   useEffect(() => {
@@ -305,14 +317,44 @@ export default function Home() {
     document.head.appendChild(script);
   }, []);
 
+  // Restore cached phone (so Mini App remembers after share)
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('ppt_phone');
+      if (cached) setUserPhone(cached);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       const w = window.Telegram.WebApp;
-      w.ready();
-      w.expand();
-      w.setHeaderColor('#ffffff');
-      w.setBackgroundColor('#ffffff');
+      try {
+        w.ready();
+        w.expand();
+        if (w.setHeaderColor) w.setHeaderColor('#ffffff');
+        if (w.setBackgroundColor) w.setBackgroundColor('#ffffff');
+      } catch {}
       setUser(w.initDataUnsafe?.user || null);
+
+      // Listen for contact share (phone auto-role)
+      const onContact = (event) => {
+        try {
+          const phone =
+            event?.responseUnsafe?.contact?.phone_number ||
+            event?.contact?.phone_number ||
+            '';
+          if (phone) {
+            const digits = String(phone).replace(/\D/g, '');
+            setUserPhone(digits);
+            try { localStorage.setItem('ppt_phone', digits); } catch {}
+            setPhonePrompt(false);
+          }
+        } catch {}
+      };
+      try { w.onEvent && w.onEvent('contactRequested', onContact); } catch {}
+      return () => {
+        try { w.offEvent && w.offEvent('contactRequested', onContact); } catch {}
+      };
     }
   }, []);
 
@@ -320,36 +362,96 @@ export default function Home() {
   useEffect(() => {
     fetch(`${API}/api/branches`, { method: 'POST' })
       .then(r => r.json())
-      .then(d => { 
-        setBranches(d.branches || []); 
-        setFactory(d.factory); 
+      .then(d => {
+        setBranches(d.branches || []);
+        setFactory(d.factory);
         setDriverInfo(d.driver);
         if (d.factory) setOverrideBranchId(d.factory.id);
       })
       .catch(() => {});
   }, []);
 
-  // Determine user role and branch from Database
-  useEffect(() => {
+  // Auto role: phone (preferred) → username → default driver
+  const refreshRole = useCallback(() => {
     const u = user?.username || '';
     const tid = user?.id || '';
+    setRoleLoading(true);
     fetch(`${API}/api/get-user-role`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telegram_id: tid, username: u })
+      body: JSON.stringify({
+        telegram_id: tid || null,
+        username: u || null,
+        phone: userPhone || null,
+      }),
     })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        setUserRole(d.role);
-        setUserBranchId(d.branch_id);
-        if (d.role === 'director') {
-          setActiveOverrideRole('director');
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          setUserRole(d.role || 'driver');
+          setUserBranchId(d.branch_id ?? null);
+          setMatchedBy(d.matched_by || '');
+          setRoleLabel(d.label || '');
+          if (d.role === 'director') setActiveOverrideRole('director');
+          // Ask for phone only if we could not match by phone/username/db
+          if (!userPhone && d.matched_by === 'default') {
+            setPhonePrompt(true);
+          } else {
+            setPhonePrompt(false);
+          }
         }
+      })
+      .catch(() => {})
+      .finally(() => setRoleLoading(false));
+  }, [user, userPhone]);
+
+  useEffect(() => {
+    refreshRole();
+  }, [refreshRole]);
+
+  const requestTelegramPhone = () => {
+    const w = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+    if (!w) {
+      setPhonePrompt(true);
+      return;
+    }
+    setPhoneBusy(true);
+    try {
+      if (typeof w.requestContact === 'function') {
+        w.requestContact((sent, event) => {
+          setPhoneBusy(false);
+          if (!sent) return;
+          const phone =
+            event?.responseUnsafe?.contact?.phone_number ||
+            event?.contact?.phone_number ||
+            '';
+          if (phone) {
+            const digits = String(phone).replace(/\D/g, '');
+            setUserPhone(digits);
+            try { localStorage.setItem('ppt_phone', digits); } catch {}
+            setPhonePrompt(false);
+          }
+        });
+      } else {
+        setPhoneBusy(false);
+        setPhonePrompt(true);
       }
-    })
-    .catch(() => {});
-  }, [user]);
+    } catch {
+      setPhoneBusy(false);
+      setPhonePrompt(true);
+    }
+  };
+
+  const submitManualPhone = () => {
+    const digits = String(manualPhone || '').replace(/\D/g, '');
+    if (digits.length < 9) {
+      alert('Введите номер полностью, например +998901234567');
+      return;
+    }
+    setUserPhone(digits);
+    try { localStorage.setItem('ppt_phone', digits); } catch {}
+    setPhonePrompt(false);
+  };
 
   useEffect(() => {
     if (!navigator.geolocation) { setLocError('Геолокация не поддерживается'); return; }
@@ -506,11 +608,26 @@ export default function Home() {
   const handlePinSubmit = (val) => {
     if (val === '718964') {
       if (pendingAction.type === 'simulate') {
-        const simVal = pendingAction.value;
+        // simVal format: "user:username" | "phone:998..." | ""
+        const simVal = pendingAction.value || '';
         setSimulatedUser(simVal);
-        if (simVal) {
+        if (simVal.startsWith('phone:')) {
+          const phone = simVal.slice('phone:'.length);
+          setUserPhone(phone);
+          try { localStorage.setItem('ppt_phone', phone); } catch {}
+          setUser({ username: '', first_name: `Тест (${phone})`, id: 900000 + Number(phone.slice(-4) || 1) });
+        } else if (simVal.startsWith('user:')) {
+          const uname = simVal.slice('user:'.length);
+          setUserPhone('');
+          try { localStorage.removeItem('ppt_phone'); } catch {}
+          setUser({ username: uname, first_name: `Тест (${uname})`, id: 123456 });
+        } else if (simVal) {
+          // legacy username-only value
+          setUserPhone('');
           setUser({ username: simVal, first_name: `Тест (${simVal})`, id: 123456 });
         } else {
+          setUserPhone('');
+          try { localStorage.removeItem('ppt_phone'); } catch {}
           setUser(null);
         }
       } else if (pendingAction.type === 'override') {
@@ -618,19 +735,24 @@ export default function Home() {
       {/* 1. Local Debugging Simulator (Only visible outside Telegram) */}
       {!isTelegram && (
         <div style={c.debugBar}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: '#4b5563' }}>🛠️ Отладка:</div>
-          <select 
+          <div style={{ fontWeight: 600, fontSize: 12, color: '#4b5563' }}>🛠️ Отладка роли:</div>
+          <select
             value={simulatedUser}
             onChange={(e) => requestSimulateChange(e.target.value)}
             style={c.debugSelect}
           >
-            <option value="">Развозчик (по умолчанию)</option>
-            <option value="grxt777">👑 Директор (grxt777)</option>
-            {factory && (
-              <option value={factory.manager_username}>🏭 Управ: {factory.name} ({factory.manager_username})</option>
+            <option value="">🚚 Развозчик (default / +998935664333)</option>
+            <option value="phone:998935664333">🚚 Развозчик по телефону</option>
+            <option value="user:grxt777">👑 Директор (username grxt777)</option>
+            {factory?.manager_username && (
+              <option value={`user:${factory.manager_username}`}>
+                🏭 Управ username: {factory.name}
+              </option>
             )}
-            {branches.map(b => (
-              <option key={b.id} value={b.manager_username}>🏢 Управ: {b.name} ({b.manager_username})</option>
+            {branches.map((b) => (
+              <option key={`u-${b.id}`} value={b.manager_phone ? `phone:${String(b.manager_phone).replace(/\D/g, '')}` : `user:${b.manager_username}`}>
+                🏢 {b.name} {b.manager_phone ? `(тел ${b.manager_phone})` : `(@${b.manager_username})`}
+              </option>
             ))}
           </select>
         </div>
@@ -640,7 +762,7 @@ export default function Home() {
       {userRole === 'director' && (
         <div style={c.switcherContainer}>
           <div style={c.switcherLabel}>Режим просмотра:</div>
-          <select 
+          <select
             style={c.switcherSelect}
             value={activeOverrideRole === 'manager' ? `manager_${overrideBranchId}` : activeOverrideRole}
             onChange={(e) => requestOverrideChange(e.target.value)}
@@ -651,7 +773,7 @@ export default function Home() {
               {factory && (
                 <option value={`manager_${factory.id}`}>🏭 {factory.name} (Управ)</option>
               )}
-              {branches.map(b => (
+              {branches.map((b) => (
                 <option key={b.id} value={`manager_${b.id}`}>🏢 {b.name} (Управ)</option>
               ))}
             </optgroup>
@@ -665,16 +787,14 @@ export default function Home() {
           <div style={c.modal}>
             <div style={c.modalTitle}>Подтверждение доступа</div>
             <div style={c.modalSub}>Введите 6-значный PIN-код директора для смены интерфейса:</div>
-            <input 
+            <input
               type="password"
               maxLength={6}
               value={pinValue}
               onChange={(e) => {
                 const val = e.target.value.replace(/\D/g, '');
                 setPinValue(val);
-                if (val.length === 6) {
-                  handlePinSubmit(val);
-                }
+                if (val.length === 6) handlePinSubmit(val);
               }}
               placeholder="••••••"
               style={c.pinInput}
@@ -685,6 +805,37 @@ export default function Home() {
               <button style={c.btnCancel} onClick={cancelPinModal}>Отмена</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Phone share banner — auto role */}
+      {phonePrompt && (
+        <div style={c.phoneBanner}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>📱 Определим вашу роль по номеру</div>
+          <div style={{ fontSize: 12, color: '#52525b', lineHeight: 1.4, marginBottom: 10 }}>
+            Управляющие и развозчик определяются автоматически по телефону. Поделитесь номером один раз.
+          </div>
+          {isTelegram && (
+            <button style={c.phoneBtn} onClick={requestTelegramPhone} disabled={phoneBusy}>
+              {phoneBusy ? 'Ожидание…' : 'Отправить номер из Telegram'}
+            </button>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <input
+              type="tel"
+              placeholder="+998 XX XXX XX XX"
+              value={manualPhone}
+              onChange={(e) => setManualPhone(e.target.value)}
+              style={c.phoneInput}
+            />
+            <button style={c.phoneBtnSecondary} onClick={submitManualPhone}>OK</button>
+          </div>
+          <button
+            style={{ ...c.back, marginTop: 4 }}
+            onClick={() => setPhonePrompt(false)}
+          >
+            Продолжить как развозчик
+          </button>
         </div>
       )}
 
@@ -699,13 +850,26 @@ export default function Home() {
             <TruckIcon size={22} style={c.headerTitleIcon} />
           )}
           <div style={c.headerTitle}>
-            {activeRole === 'director' ? 'Панель Директора' : activeRole === 'manager' ? 'Панель Управляющего' : 'Трекер доставок'}
+            {roleLoading
+              ? 'Загрузка…'
+              : activeRole === 'director'
+                ? 'Панель Директора'
+                : activeRole === 'manager'
+                  ? 'Панель Управляющего'
+                  : 'Трекер доставок'}
           </div>
         </div>
         <div style={c.headerSub}>
           {activeRole === 'manager' && managerActiveBranch ? `${managerActiveBranch.name} · ` : ''}
           {user ? user.first_name || user.username : driverInfo?.name || 'Развозчик'}
+          {matchedBy ? ` · ${matchedBy === 'phone' ? '📱' : matchedBy === 'username' ? '@' : matchedBy === 'db' ? 'DB' : 'auto'}` : ''}
+          {userPhone ? ` · +${String(userPhone).replace(/^\+/, '')}` : ''}
         </div>
+        {isTelegram && !userPhone && (
+          <button style={c.linkBtn} onClick={requestTelegramPhone}>
+            Привязать телефон для авто-роли
+          </button>
+        )}
       </div>
 
       {/* RENDER VIEW ACCORDING TO ROLE */}
@@ -1949,5 +2113,56 @@ const c = {
     fontSize: 12,
     fontWeight: 600,
     cursor: 'pointer'
-  }
+  },
+
+  // Phone auto-role UI
+  phoneBanner: {
+    margin: '0 16px 12px',
+    padding: 16,
+    borderRadius: 14,
+    border: '1px solid #e4e4e7',
+    background: '#fafafa',
+    textAlign: 'left',
+  },
+  phoneBtn: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 10,
+    border: 'none',
+    background: '#18181b',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  phoneBtnSecondary: {
+    padding: '10px 14px',
+    borderRadius: 10,
+    border: 'none',
+    background: '#18181b',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  phoneInput: {
+    flex: 1,
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: '1px solid #e4e4e7',
+    fontSize: 14,
+    outline: 'none',
+    background: '#fff',
+  },
+  linkBtn: {
+    marginTop: 8,
+    background: 'transparent',
+    border: 'none',
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+  },
 };

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, initDb } from '@/lib/db';
-import { BRANCHES, FACTORY } from '@/lib/branches';
+import { resolveIdentity, normalizePhone } from '@/lib/branches';
 
 let dbInitialized = false;
 
@@ -11,16 +11,19 @@ export async function POST(request) {
   }
 
   try {
-    const { telegram_id, username } = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const telegram_id = body.telegram_id ? Number(body.telegram_id) : null;
+    const username = body.username ? String(body.username).replace(/^@/, '') : '';
+    const phone = body.phone ? normalizePhone(body.phone) : '';
 
     const db = getDb();
     let userAccess = null;
 
-    // 1. Query the database first
+    // 1) Explicit ACL from DB (director-granted) — highest priority
     if (telegram_id) {
       const res = await db.execute(
         'SELECT * FROM user_access WHERE telegram_id = ?',
-        [Number(telegram_id)]
+        [telegram_id]
       );
       if (res.rows.length > 0) userAccess = res.rows[0];
     }
@@ -33,33 +36,30 @@ export async function POST(request) {
       if (res.rows.length > 0) userAccess = res.rows[0];
     }
 
-    // 2. If a custom role exists, return it
     if (userAccess) {
       return NextResponse.json({
         ok: true,
         role: userAccess.role,
-        branch_id: userAccess.branch_id
+        branch_id: userAccess.branch_id,
+        matched_by: 'db',
+        phone: phone || null,
+        username: username || null,
       });
     }
 
-    // 3. Fallback to static checks
-    const targetUsername = username ? username.toLowerCase() : '';
-    
-    // Director fallback
-    if (targetUsername === 'grxt777') {
-      return NextResponse.json({ ok: true, role: 'director', branch_id: null });
-    }
+    // 2) Auto role by phone (preferred) → username → default driver
+    const identity = resolveIdentity({ phone, username });
 
-    // Manager fallback
-    const managedBranch = BRANCHES.find(b => b.manager_username?.toLowerCase() === targetUsername) || 
-                          (FACTORY.manager_username?.toLowerCase() === targetUsername ? FACTORY : null);
-
-    if (managedBranch) {
-      return NextResponse.json({ ok: true, role: 'manager', branch_id: managedBranch.id });
-    }
-
-    // Default driver
-    return NextResponse.json({ ok: true, role: 'driver', branch_id: null });
+    return NextResponse.json({
+      ok: true,
+      role: identity.role,
+      branch_id: identity.branch_id,
+      matched_by: identity.matched_by,
+      label: identity.label,
+      phone: identity.phone || null,
+      username: username || null,
+      needs_phone: !phone && identity.matched_by === 'default' && !username,
+    });
   } catch (error) {
     console.error('Get user role API error:', error);
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
