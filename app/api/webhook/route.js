@@ -34,9 +34,13 @@ export async function GET(request) {
 
   if (searchParams.get('setup') === '1') {
     const url = new URL(request.url);
-    const webhookUrl = `${url.origin}/api/webhook`;
+    // Prefer explicit production host if behind proxy
+    const host = request.headers.get('x-forwarded-host') || url.host;
+    const proto = request.headers.get('x-forwarded-proto') || url.protocol.replace(':', '') || 'https';
+    const webhookUrl = `${proto}://${host}/api/webhook`;
     const res = await setWebhook(webhookUrl);
-    return NextResponse.json({ ok: true, webhook: webhookUrl, ...res });
+    const status = res.ok ? 200 : 500;
+    return NextResponse.json({ ...res, webhook: webhookUrl }, { status });
   }
 
   if (searchParams.get('diagnose') === '1') {
