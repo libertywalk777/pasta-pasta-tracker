@@ -548,15 +548,18 @@ export default function Home() {
     setTab('deliver');
   };
 
-  // Load Driver History
+  // Load Driver History (real Telegram id only)
   const loadHistory = useCallback(() => {
-    const id = user?.id || 0;
-    if (!id && !userPhone) return;
+    const id = user?.id;
+    if (!id) {
+      setDeliveries([]);
+      return;
+    }
     fetch(`${API}/api/my-deliveries`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ driver_id: id || 123456 }),
+      body: JSON.stringify({ driver_id: id }),
     }).then(r => r.json()).then(d => setDeliveries(d.deliveries || [])).catch(() => {});
-  }, [user, userPhone]);
+  }, [user]);
 
   // Load Manager History and Pending Deliveries
   const loadBranchHistory = useCallback(() => {
@@ -628,21 +631,29 @@ export default function Home() {
 
   const submit = async (type, branchId) => {
     if (!location) return;
+    if (!user?.id) {
+      setError('Откройте приложение из Telegram — нужен реальный аккаунт');
+      setStep('error');
+      return;
+    }
     setLoading(true); setError(''); setResult(null);
     try {
       const r = await fetch(`${API}/api/deliver`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          driver_id: user?.id || 123456,
-          driver_name: user?.first_name || user?.username || 'Развозчик',
-          branch_id: branchId, lat: location.lat, lng: location.lng, type,
+          driver_id: user.id,
+          driver_name: user.first_name || user.username || roleLabel || 'Развозчик',
+          branch_id: branchId,
+          lat: location.lat,
+          lng: location.lng,
+          type,
+          phone: userPhone || null,
         }),
       });
       const d = await r.json();
       if (d.ok) {
         setResult({ ...d, type });
         setStep(type === 'pickup' ? 'done_pickup' : 'done_delivery');
-        // refresh history in background
         loadHistory();
       } else {
         setError(d.message || d.error || 'Ошибка');
@@ -656,13 +667,23 @@ export default function Home() {
   };
 
   const handleConfirm = async (deliveryId, status) => {
+    if (!user?.id) {
+      alert('Откройте приложение из Telegram — нужен реальный аккаунт');
+      return;
+    }
     setActionLoading(deliveryId);
     try {
-      const managerId = user?.id || 9999;
-      const managerName = user?.first_name || user?.username || roleLabel || 'Управляющий';
+      const managerId = user.id;
+      const managerName = user.first_name || user.username || roleLabel || 'Управляющий';
       const r = await fetch(`${API}/api/confirm-delivery`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delivery_id: deliveryId, status, manager_id: managerId, manager_name: managerName }),
+        body: JSON.stringify({
+          delivery_id: deliveryId,
+          status,
+          manager_id: managerId,
+          manager_name: managerName,
+          phone: userPhone || null,
+        }),
       });
       const d = await r.json();
       if (d.ok) {
@@ -1284,6 +1305,11 @@ export default function Home() {
 
           {tab === 'deliver' ? (
             <div style={c.content}>
+              {!user?.id && (
+                <div style={c.locBad}>
+                  <span>Откройте Mini App из Telegram-бота — без реального аккаунта отметки не сохраняются</span>
+                </div>
+              )}
               <div style={location ? c.locOk : c.locBad}>
                 <PinIcon size={15} />
                 <span>{location ? 'Геолокация активна' : (locError || 'Определяем геопозицию...')}</span>
@@ -1293,14 +1319,14 @@ export default function Home() {
                 <>
                   <div style={c.label}>Выберите действие</div>
                   <div style={c.btnStack}>
-                    <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => submit('pickup', 0)}>
+                    <button style={location && user?.id ? c.bigBtn : c.bigOff} disabled={!location || !user?.id || loading} onClick={() => submit('pickup', 0)}>
                       <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
                         <PackageIcon size={20} />
                       </div>
                       <span style={c.bigBtnTitle}>Забрал с фабрики</span>
                       <span style={c.bigSub}>{factory?.name} · {factory?.address}</span>
                     </button>
-                    <button style={location ? c.bigBtn : c.bigOff} disabled={!location} onClick={() => setStep('deliver')}>
+                    <button style={location && user?.id ? c.bigBtn : c.bigOff} disabled={!location || !user?.id} onClick={() => setStep('deliver')}>
                       <div style={location ? c.bigIconContainer : c.bigIconContainerOff}>
                         <TruckIcon size={20} />
                       </div>

@@ -95,4 +95,19 @@ CREATE POLICY "user_access_all" ON public.user_access
   FOR ALL TO anon, authenticated, service_role
   USING (true) WITH CHECK (true);
 
+-- App runtime settings (e.g. auto-detected Telegram group chat id)
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+GRANT ALL ON TABLE public.app_settings TO anon, authenticated, service_role;
+
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "app_settings_all" ON public.app_settings;
+CREATE POLICY "app_settings_all" ON public.app_settings
+  FOR ALL TO anon, authenticated, service_role
+  USING (true) WITH CHECK (true);
+
 -- Done. Tables are ready for the Next.js app.
