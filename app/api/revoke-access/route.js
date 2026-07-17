@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, initDb } from '@/lib/db';
+import { requireDirector } from '@/lib/auth';
 
 let dbInitialized = false;
 
@@ -10,19 +11,24 @@ export async function POST(request) {
   }
 
   try {
-    const { username, telegram_id } = await request.json();
-
-    // Verify requesting user is Director
-    if (!username || username.toLowerCase() !== 'grxt777') {
-      return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
+    const body = await request.json();
+    const authBody = {
+      username: body.username,
+      phone: body.phone,
+      telegram_id: body.director_telegram_id ?? body.auth_telegram_id ?? null,
+    };
+    const auth = await requireDirector(authBody);
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
     }
 
-    if (!telegram_id) {
+    const revokeId = body.target_telegram_id ?? body.telegram_id;
+    if (!revokeId) {
       return NextResponse.json({ ok: false, error: 'Telegram User ID is required' }, { status: 400 });
     }
 
     const db = getDb();
-    await db.execute('DELETE FROM user_access WHERE telegram_id = ?', [Number(telegram_id)]);
+    await db.execute('DELETE FROM user_access WHERE telegram_id = ?', [Number(revokeId)]);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

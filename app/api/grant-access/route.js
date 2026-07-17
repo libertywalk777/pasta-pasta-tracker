@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, initDb } from '@/lib/db';
+import { requireDirector } from '@/lib/auth';
 
 let dbInitialized = false;
 
@@ -10,14 +11,23 @@ export async function POST(request) {
   }
 
   try {
-    const { username, telegram_id, telegram_username, role, branch_id } = await request.json();
+    const body = await request.json();
 
-    // Verify requesting user is Director
-    if (!username || username.toLowerCase() !== 'grxt777') {
-      return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
+    // Director identity may come as director_telegram_id to avoid clash with target
+    const authBody = {
+      username: body.username,
+      phone: body.phone,
+      telegram_id: body.director_telegram_id ?? body.auth_telegram_id ?? null,
+    };
+    const auth = await requireDirector(authBody);
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
     }
 
-    if (!telegram_id) {
+    const targetId = body.target_telegram_id ?? body.telegram_id;
+    const { telegram_username, role, branch_id } = body;
+
+    if (!targetId) {
       return NextResponse.json({ ok: false, error: 'Telegram User ID is required' }, { status: 400 });
     }
 
@@ -29,10 +39,10 @@ export async function POST(request) {
     await db.execute(
       'INSERT OR REPLACE INTO user_access (telegram_id, telegram_username, role, branch_id) VALUES (?, ?, ?, ?)',
       [
-        Number(telegram_id),
-        telegram_username ? telegram_username.trim() : null,
+        Number(targetId),
+        telegram_username ? String(telegram_username).trim().replace(/^@/, '') : null,
         role,
-        role === 'manager' ? Number(branch_id) : null
+        role === 'manager' ? Number(branch_id) : null,
       ]
     );
 

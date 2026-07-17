@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, initDb } from '@/lib/db';
+import { requireDirector } from '@/lib/auth';
 
 let dbInitialized = false;
 
@@ -10,19 +11,18 @@ export async function POST(request) {
   }
 
   try {
-    const { username } = await request.json();
-
-    // Verify requesting user is Director
-    if (!username || username.toLowerCase() !== 'grxt777') {
-      return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
+    const body = await request.json().catch(() => ({}));
+    const auth = await requireDirector(body);
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
     }
 
     const db = getDb();
     const res = await db.execute('SELECT * FROM user_access ORDER BY telegram_id DESC');
-    
+
     return NextResponse.json({
       ok: true,
-      accessList: res.rows
+      accessList: res.rows,
     });
   } catch (error) {
     console.error('Get access list API error:', error);

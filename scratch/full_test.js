@@ -202,12 +202,15 @@ async function main() {
     else fail('delivery-status', JSON.stringify(json));
   }
 
-  // 4. Director APIs
+  // 4. Director APIs (identity by username/phone — no role switcher)
   console.log('\n── Director ──');
   {
     const { json } = await api('/api/all-deliveries', { username: 'grxt777' });
-    if (json.ok && json.stats && Array.isArray(json.deliveries)) {
-      ok('all-deliveries director', `total=${json.stats.total} list=${json.deliveries.length}`);
+    if (json.ok && json.stats && json.todayStats && Array.isArray(json.deliveries)) {
+      ok(
+        'all-deliveries director',
+        `all=${json.stats.total} today=${json.todayStats.total} list=${json.deliveries.length}`
+      );
     } else fail('all-deliveries', JSON.stringify(json).slice(0, 200));
   }
   {
@@ -215,13 +218,19 @@ async function main() {
     if (status === 403 || json.ok === false) ok('all-deliveries denied for non-director');
     else fail('all-deliveries ACL', JSON.stringify(json));
   }
+  {
+    // driver phone must NOT see director dashboard
+    const { status, json } = await api('/api/all-deliveries', { phone: phones.driver });
+    if (status === 403 || json.ok === false) ok('driver phone denied director API');
+    else fail('driver director ACL', JSON.stringify(json));
+  }
 
   // grant / list / revoke access
   {
     const tgId = 888001;
     let r = await api('/api/grant-access', {
       username: 'grxt777',
-      telegram_id: tgId,
+      target_telegram_id: tgId,
       telegram_username: 'test_mgr',
       role: 'manager',
       branch_id: 3,
@@ -239,9 +248,37 @@ async function main() {
       ok('get-access-list contains granted user');
     } else fail('get-access-list', JSON.stringify(r.json).slice(0, 200));
 
-    r = await api('/api/revoke-access', { username: 'grxt777', telegram_id: tgId });
+    r = await api('/api/revoke-access', {
+      username: 'grxt777',
+      target_telegram_id: tgId,
+    });
     if (r.json.ok) ok('revoke-access');
     else fail('revoke-access', JSON.stringify(r.json));
+  }
+
+  // Dashboard visibility: new events appear in director feed
+  {
+    const before = await api('/api/all-deliveries', { username: 'grxt777' });
+    const beforeCount = before.json.stats?.total || 0;
+    const d = await api('/api/deliver', {
+      driver_id: 555999,
+      driver_name: 'Dash Test',
+      branch_id: 2,
+      lat: 41.311676,
+      lng: 69.292960,
+      type: 'delivery',
+    });
+    if (!d.json.ok) fail('dashboard seed deliver', JSON.stringify(d.json));
+    else {
+      const after = await api('/api/all-deliveries', { username: 'grxt777' });
+      const list = after.json.deliveries || [];
+      const found = list.find((x) => Number(x.id) === Number(d.json.delivery_id));
+      if (found && after.json.stats.total >= beforeCount + 1) {
+        ok('director dashboard shows new delivery', `#${found.id} ${found.branch_name} ${found.status}`);
+      } else {
+        fail('director dashboard missing event', JSON.stringify({ found, total: after.json.stats }));
+      }
+    }
   }
 
   // 5. Frontend shell

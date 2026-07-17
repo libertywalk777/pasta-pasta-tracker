@@ -258,27 +258,17 @@ export default function Home() {
   const [deliveries, setDeliveries] = useState([]);
   const [tab, setTab] = useState('deliver');
 
-  // Role and Debugging states
-  const [simulatedUser, setSimulatedUser] = useState('');
-  const [activeOverrideRole, setActiveOverrideRole] = useState('director');
-  const [overrideBranchId, setOverrideBranchId] = useState(0);
+  // Auto role state (phone-first, no manual role switch)
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
   const [roleLoading, setRoleLoading] = useState(true);
   const [matchedBy, setMatchedBy] = useState('');
   const [roleLabel, setRoleLabel] = useState('');
 
-  // Phone-based auto role
   const [userPhone, setUserPhone] = useState('');
   const [phonePrompt, setPhonePrompt] = useState(false);
   const [manualPhone, setManualPhone] = useState('');
   const [phoneBusy, setPhoneBusy] = useState(false);
-
-  // PIN Code Validation States (director view override only)
-  const [pinModalOpen, setPinModalOpen] = useState(false);
-  const [pinValue, setPinValue] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [pendingAction, setPendingAction] = useState(null); // { type: 'simulate' | 'override', value: any }
 
   // Director access list & management
   const [directorTab, setDirectorTab] = useState('activity');
@@ -290,6 +280,7 @@ export default function Home() {
 
   // Dashboard logs
   const [directorStats, setDirectorStats] = useState({ confirmed: 0, rejected: 0, pending: 0, total: 0 });
+  const [todayStats, setTodayStats] = useState({ confirmed: 0, rejected: 0, pending: 0, total: 0 });
   const [directorDeliveries, setDirectorDeliveries] = useState([]);
   const [managerDeliveries, setManagerDeliveries] = useState([]);
 
@@ -366,12 +357,13 @@ export default function Home() {
         setBranches(d.branches || []);
         setFactory(d.factory);
         setDriverInfo(d.driver);
-        if (d.factory) setOverrideBranchId(d.factory.id);
+        if (d.factory) setFormBranchId(d.factory.id);
       })
       .catch(() => {});
   }, []);
 
   // Auto role: phone (preferred) → username → default driver
+  // No manual role switch — identity is resolved only from phone/username.
   const refreshRole = useCallback(() => {
     const u = user?.username || '';
     const tid = user?.id || '';
@@ -392,9 +384,8 @@ export default function Home() {
           setUserBranchId(d.branch_id ?? null);
           setMatchedBy(d.matched_by || '');
           setRoleLabel(d.label || '');
-          if (d.role === 'director') setActiveOverrideRole('director');
-          // Ask for phone only if we could not match by phone/username/db
-          if (!userPhone && d.matched_by === 'default') {
+          // Ask for phone if not matched by phone yet (username-only is ok but phone is preferred)
+          if (!userPhone && d.matched_by !== 'phone' && d.matched_by !== 'db') {
             setPhonePrompt(true);
           } else {
             setPhonePrompt(false);
@@ -463,32 +454,19 @@ export default function Home() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  // Resolve active role and active branch
-  let activeRole = userRole;
-  let activeBranchId = userBranchId;
-
-  if (userRole === 'director') {
-    if (activeOverrideRole === 'driver') {
-      activeRole = 'driver';
-      activeBranchId = null;
-    } else if (activeOverrideRole === 'manager') {
-      activeRole = 'manager';
-      activeBranchId = overrideBranchId !== null ? overrideBranchId : (factory?.id || 0);
-    } else {
-      activeRole = 'director';
-      activeBranchId = null;
-    }
-  }
+  // Role is automatic — no override switch
+  const activeRole = userRole;
+  const activeBranchId = userBranchId;
 
   // Load Driver History
   const loadHistory = useCallback(() => {
     const id = user?.id || 0;
-    if (!id && !simulatedUser) return;
+    if (!id && !userPhone) return;
     fetch(`${API}/api/my-deliveries`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ driver_id: id || 123456 }),
     }).then(r => r.json()).then(d => setDeliveries(d.deliveries || [])).catch(() => {});
-  }, [user, simulatedUser]);
+  }, [user, userPhone]);
 
   // Load Manager History and Pending Deliveries
   const loadBranchHistory = useCallback(() => {
@@ -499,32 +477,41 @@ export default function Home() {
     }).then(r => r.json()).then(d => setManagerDeliveries(d.deliveries || [])).catch(() => {});
   }, [activeBranchId]);
 
-  // Load Director Dashboard Statistics
+  // Load Director Dashboard Statistics (all events from DB)
   const loadDirectorStats = useCallback(() => {
     fetch(`${API}/api/all-deliveries`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user?.username || 'grxt777' }),
+      body: JSON.stringify({
+        username: user?.username || null,
+        phone: userPhone || null,
+        telegram_id: user?.id || null,
+      }),
     }).then(r => r.json()).then(d => {
       if (d.ok) {
-        setDirectorStats(d.stats);
+        setDirectorStats(d.stats || { confirmed: 0, rejected: 0, pending: 0, total: 0 });
+        setTodayStats(d.todayStats || { confirmed: 0, rejected: 0, pending: 0, total: 0 });
         setDirectorDeliveries(d.deliveries || []);
       }
     }).catch(() => {});
-  }, [user]);
+  }, [user, userPhone]);
 
   // Load Director Access List
   const loadAccessList = useCallback(() => {
     fetch(`${API}/api/get-access-list`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user?.username || 'grxt777' })
+      body: JSON.stringify({
+        username: user?.username || null,
+        phone: userPhone || null,
+        telegram_id: user?.id || null,
+      })
     })
     .then(r => r.json())
     .then(d => {
       if (d.ok) setAccessList(d.accessList || []);
     })
     .catch(() => {});
-  }, [user]);
+  }, [user, userPhone]);
 
   // Fetch triggers
   useEffect(() => { 
@@ -590,69 +577,13 @@ export default function Home() {
     setActionLoading(null);
   };
 
-  // PIN verification handlers
-  const requestSimulateChange = (val) => {
-    setPendingAction({ type: 'simulate', value: val });
-    setPinValue('');
-    setPinError('');
-    setPinModalOpen(true);
-  };
+  // Access management handlers (director only — identity from phone/username)
+  const directorAuthBody = () => ({
+    username: user?.username || null,
+    phone: userPhone || null,
+    telegram_id: user?.id || null,
+  });
 
-  const requestOverrideChange = (val) => {
-    setPendingAction({ type: 'override', value: val });
-    setPinValue('');
-    setPinError('');
-    setPinModalOpen(true);
-  };
-
-  const handlePinSubmit = (val) => {
-    if (val === '718964') {
-      if (pendingAction.type === 'simulate') {
-        // simVal format: "user:username" | "phone:998..." | ""
-        const simVal = pendingAction.value || '';
-        setSimulatedUser(simVal);
-        if (simVal.startsWith('phone:')) {
-          const phone = simVal.slice('phone:'.length);
-          setUserPhone(phone);
-          try { localStorage.setItem('ppt_phone', phone); } catch {}
-          setUser({ username: '', first_name: `Тест (${phone})`, id: 900000 + Number(phone.slice(-4) || 1) });
-        } else if (simVal.startsWith('user:')) {
-          const uname = simVal.slice('user:'.length);
-          setUserPhone('');
-          try { localStorage.removeItem('ppt_phone'); } catch {}
-          setUser({ username: uname, first_name: `Тест (${uname})`, id: 123456 });
-        } else if (simVal) {
-          // legacy username-only value
-          setUserPhone('');
-          setUser({ username: simVal, first_name: `Тест (${simVal})`, id: 123456 });
-        } else {
-          setUserPhone('');
-          try { localStorage.removeItem('ppt_phone'); } catch {}
-          setUser(null);
-        }
-      } else if (pendingAction.type === 'override') {
-        const overVal = pendingAction.value;
-        if (overVal.startsWith('manager_')) {
-          const bId = Number(overVal.split('_')[1]);
-          setActiveOverrideRole('manager');
-          setOverrideBranchId(bId);
-        } else {
-          setActiveOverrideRole(overVal);
-          if (overVal === 'manager') setOverrideBranchId(factory?.id || 0);
-        }
-      }
-      setPinModalOpen(false);
-    } else {
-      setPinError('Неверный PIN-код!');
-    }
-  };
-
-  const cancelPinModal = () => {
-    setPinModalOpen(false);
-    setPendingAction(null);
-  };
-
-  // Access management handlers
   const handleGrantAccess = async (e) => {
     e.preventDefault();
     if (!formTgId) return;
@@ -661,8 +592,12 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: user?.username || 'grxt777',
-          telegram_id: Number(formTgId),
+          // director identity (phone/username) — do NOT overwrite with target id
+          username: user?.username || null,
+          phone: userPhone || null,
+          director_telegram_id: user?.id || null,
+          // target user being granted
+          target_telegram_id: Number(formTgId),
           telegram_username: formTgUsername || null,
           role: formRole,
           branch_id: formRole === 'manager' ? Number(formBranchId) : null
@@ -688,8 +623,10 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: user?.username || 'grxt777',
-          telegram_id: tgId
+          username: user?.username || null,
+          phone: userPhone || null,
+          director_telegram_id: user?.id || null,
+          target_telegram_id: tgId,
         })
       });
       const d = await r.json();
@@ -732,88 +669,12 @@ export default function Home() {
 
   return (
     <main style={c.container}>
-      {/* 1. Local Debugging Simulator (Only visible outside Telegram) */}
-      {!isTelegram && (
-        <div style={c.debugBar}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: '#4b5563' }}>🛠️ Отладка роли:</div>
-          <select
-            value={simulatedUser}
-            onChange={(e) => requestSimulateChange(e.target.value)}
-            style={c.debugSelect}
-          >
-            <option value="">🚚 Развозчик (default / +998935664333)</option>
-            <option value="phone:998935664333">🚚 Развозчик по телефону</option>
-            <option value="user:grxt777">👑 Директор (username grxt777)</option>
-            {factory?.manager_username && (
-              <option value={`user:${factory.manager_username}`}>
-                🏭 Управ username: {factory.name}
-              </option>
-            )}
-            {branches.map((b) => (
-              <option key={`u-${b.id}`} value={b.manager_phone ? `phone:${String(b.manager_phone).replace(/\D/g, '')}` : `user:${b.manager_username}`}>
-                🏢 {b.name} {b.manager_phone ? `(тел ${b.manager_phone})` : `(@${b.manager_username})`}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* 2. Director View Overrides Switcher */}
-      {userRole === 'director' && (
-        <div style={c.switcherContainer}>
-          <div style={c.switcherLabel}>Режим просмотра:</div>
-          <select
-            style={c.switcherSelect}
-            value={activeOverrideRole === 'manager' ? `manager_${overrideBranchId}` : activeOverrideRole}
-            onChange={(e) => requestOverrideChange(e.target.value)}
-          >
-            <option value="director">👑 Панель Директора</option>
-            <option value="driver">🚚 Режим Развозчика</option>
-            <optgroup label="Режим Управляющего">
-              {factory && (
-                <option value={`manager_${factory.id}`}>🏭 {factory.name} (Управ)</option>
-              )}
-              {branches.map((b) => (
-                <option key={b.id} value={`manager_${b.id}`}>🏢 {b.name} (Управ)</option>
-              ))}
-            </optgroup>
-          </select>
-        </div>
-      )}
-
-      {/* 3. PIN Verification Modal */}
-      {pinModalOpen && (
-        <div style={c.modalOverlay}>
-          <div style={c.modal}>
-            <div style={c.modalTitle}>Подтверждение доступа</div>
-            <div style={c.modalSub}>Введите 6-значный PIN-код директора для смены интерфейса:</div>
-            <input
-              type="password"
-              maxLength={6}
-              value={pinValue}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '');
-                setPinValue(val);
-                if (val.length === 6) handlePinSubmit(val);
-              }}
-              placeholder="••••••"
-              style={c.pinInput}
-              autoFocus
-            />
-            {pinError && <div style={c.pinError}>{pinError}</div>}
-            <div style={c.modalActions}>
-              <button style={c.btnCancel} onClick={cancelPinModal}>Отмена</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Phone share banner — auto role */}
+      {/* Phone identity — sole way to select role (automatic) */}
       {phonePrompt && (
         <div style={c.phoneBanner}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>📱 Определим вашу роль по номеру</div>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>📱 Вход по номеру телефона</div>
           <div style={{ fontSize: 12, color: '#52525b', lineHeight: 1.4, marginBottom: 10 }}>
-            Управляющие и развозчик определяются автоматически по телефону. Поделитесь номером один раз.
+            Роль (развозчик / управляющий / директор) определяется <b>только по номеру</b>. Переключателя ролей нет.
           </div>
           {isTelegram && (
             <button style={c.phoneBtn} onClick={requestTelegramPhone} disabled={phoneBusy}>
@@ -828,14 +689,8 @@ export default function Home() {
               onChange={(e) => setManualPhone(e.target.value)}
               style={c.phoneInput}
             />
-            <button style={c.phoneBtnSecondary} onClick={submitManualPhone}>OK</button>
+            <button style={c.phoneBtnSecondary} onClick={submitManualPhone}>Войти</button>
           </div>
-          <button
-            style={{ ...c.back, marginTop: 4 }}
-            onClick={() => setPhonePrompt(false)}
-          >
-            Продолжить как развозчик
-          </button>
         </div>
       )}
 
@@ -861,13 +716,26 @@ export default function Home() {
         </div>
         <div style={c.headerSub}>
           {activeRole === 'manager' && managerActiveBranch ? `${managerActiveBranch.name} · ` : ''}
-          {user ? user.first_name || user.username : driverInfo?.name || 'Развозчик'}
-          {matchedBy ? ` · ${matchedBy === 'phone' ? '📱' : matchedBy === 'username' ? '@' : matchedBy === 'db' ? 'DB' : 'auto'}` : ''}
+          {roleLabel || (user ? user.first_name || user.username : driverInfo?.name || 'Развозчик')}
+          {matchedBy === 'phone' ? ' · 📱' : matchedBy === 'username' ? ' · @' : matchedBy === 'db' ? ' · DB' : ''}
           {userPhone ? ` · +${String(userPhone).replace(/^\+/, '')}` : ''}
         </div>
-        {isTelegram && !userPhone && (
-          <button style={c.linkBtn} onClick={requestTelegramPhone}>
-            Привязать телефон для авто-роли
+        {!userPhone && (
+          <button style={c.linkBtn} onClick={() => { setPhonePrompt(true); if (isTelegram) requestTelegramPhone(); }}>
+            Указать телефон
+          </button>
+        )}
+        {userPhone && (
+          <button
+            style={c.linkBtn}
+            onClick={() => {
+              setUserPhone('');
+              try { localStorage.removeItem('ppt_phone'); } catch {}
+              setPhonePrompt(true);
+              setManualPhone('');
+            }}
+          >
+            Сменить номер
           </button>
         )}
       </div>
@@ -897,11 +765,31 @@ export default function Home() {
 
           {directorTab === 'activity' ? (
             <>
-              {/* Stats Cards */}
+              {/* Stats Cards — today + all-time from DB */}
+              <div style={c.label}>Сегодня</div>
               <div style={c.statsContainer}>
                 <div style={c.statCard}>
+                  <div style={c.statVal}>{todayStats.total}</div>
+                  <div style={c.statLbl}>Всего сегодня</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #16a34a' }}>
+                  <div style={{ ...c.statVal, color: '#16a34a' }}>{todayStats.confirmed}</div>
+                  <div style={c.statLbl}>Подтверждено</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #d97706' }}>
+                  <div style={{ ...c.statVal, color: '#d97706' }}>{todayStats.pending}</div>
+                  <div style={c.statLbl}>Ожидает</div>
+                </div>
+                <div style={{ ...c.statCard, borderLeft: '3px solid #dc2626' }}>
+                  <div style={{ ...c.statVal, color: '#dc2626' }}>{todayStats.rejected}</div>
+                  <div style={c.statLbl}>Отклонено</div>
+                </div>
+              </div>
+              <div style={c.label}>Всего в базе</div>
+              <div style={{ ...c.statsContainer, marginBottom: 12 }}>
+                <div style={c.statCard}>
                   <div style={c.statVal}>{directorStats.total}</div>
-                  <div style={c.statLbl}>Всего за день</div>
+                  <div style={c.statLbl}>Все события</div>
                 </div>
                 <div style={{ ...c.statCard, borderLeft: '3px solid #16a34a' }}>
                   <div style={{ ...c.statVal, color: '#16a34a' }}>{directorStats.confirmed}</div>
