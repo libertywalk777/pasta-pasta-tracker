@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { BRANCHES, FACTORY, DRIVER, DIRECTOR, DIRECTORS } from '@/lib/branches';
+import { BRANCHES, FACTORY, DRIVER, DRIVERS, DIRECTOR, DIRECTORS } from '@/lib/branches';
 
 export async function POST() {
   return NextResponse.json({
@@ -22,6 +22,11 @@ export async function POST() {
       manager_phone: FACTORY.manager_phone || null,
     },
     driver: DRIVER,
+    drivers: DRIVERS.map((d) => ({
+      name: d.name,
+      phone: d.phone || null,
+      username: d.username || null,
+    })),
     director: {
       username: DIRECTOR.username,
       phone: DIRECTOR.phone || null,

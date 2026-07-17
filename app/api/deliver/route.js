@@ -66,11 +66,15 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'Failed to save delivery' }, { status: 500 });
     }
 
-    // 2) Notify manager + group about ANY new action (pickup / delivery)
-    //    Group gets the event immediately; manager gets confirm buttons.
-    notifyManager(deliveryId, target.id).catch((e) =>
-      console.error('Notify failed:', e?.message || e)
-    );
+    // 2) MUST await group/manager notify on Vercel — fire-and-forget gets frozen after response
+    let notify = { ok: false };
+    try {
+      await notifyManager(deliveryId, target.id);
+      notify = { ok: true };
+    } catch (e) {
+      console.error('Notify failed:', e?.message || e);
+      notify = { ok: false, error: e?.message || String(e) };
+    }
 
     return NextResponse.json({
       ok: true,
@@ -80,6 +84,8 @@ export async function POST(request) {
       status: 'pending',
       type: deliveryType,
       created_at: now,
+      notified: notify.ok,
+      notify_error: notify.ok ? null : notify.error || null,
     });
   } catch (error) {
     console.error('Deliver API error:', error);
