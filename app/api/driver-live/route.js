@@ -45,6 +45,31 @@ export async function POST(request) {
 
     let rows = [];
     try {
+      // Direct probe so missing-table is not swallowed as empty list
+      const { getSupabase } = require('@/lib/db');
+      const sb = getSupabase();
+      const probe = await sb.from('driver_tracks').select('id').limit(1);
+      if (probe.error) {
+        const msg = probe.error.message || '';
+        if (
+          probe.error.code === 'PGRST205' ||
+          msg.includes('driver_tracks') ||
+          msg.includes('schema cache')
+        ) {
+          return NextResponse.json({
+            ok: true,
+            table_missing: true,
+            drivers: [],
+            points: [],
+            message:
+              'Run supabase/migrate_driver_tracks.sql in Supabase SQL Editor (one-time)',
+            branches: BRANCHES,
+            factory: FACTORY,
+          });
+        }
+        throw probe.error;
+      }
+
       const res = await db.execute(
         'SELECT * FROM driver_tracks WHERE created_at >= ? ORDER BY id DESC LIMIT 2000',
         [since]
