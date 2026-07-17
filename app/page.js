@@ -501,15 +501,84 @@ export default function Home() {
     }
   };
 
+  // Live GPS for delivery check + background track upload for director dashboard
+  const [trackStatus, setTrackStatus] = useState('');
+  const lastTrackSentRef = React.useRef(0);
+
   useEffect(() => {
-    if (!navigator.geolocation) { setLocError('Геолокация не поддерживается'); return; }
+    if (!navigator.geolocation) {
+      setLocError('Геолокация не поддерживается');
+      return;
+    }
+
+    const pushTrack = (coords) => {
+      // Only real drivers with Telegram id stream GPS to dashboard
+      if (!user?.id || userRole !== 'driver') return;
+
+      const now = Date.now();
+      if (now - lastTrackSentRef.current < 8000) return;
+      lastTrackSentRef.current = now;
+
+      const body = {
+        driver_id: user.id,
+        driver_name: user.first_name || user.username || 'Развозчик',
+        phone: userPhone || null,
+        lat: coords.latitude,
+        lng: coords.longitude,
+        accuracy: coords.accuracy ?? null,
+        speed: coords.speed ?? null,
+        heading: coords.heading ?? null,
+      };
+
+      try {
+        fetch(`${API}/api/track`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          keepalive: true,
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.ok) setTrackStatus(`📡 ${new Date().toLocaleTimeString('ru-RU')}`);
+            else if (d.error === 'table_missing') setTrackStatus('📡 трек: нужна SQL-миграция');
+            else setTrackStatus('📡 трек: ошибка');
+          })
+          .catch(() => setTrackStatus('📡 трек: нет сети'));
+      } catch {}
+    };
+
     const id = navigator.geolocation.watchPosition(
-      p => { setLocation({ lat: p.coords.latitude, lng: p.coords.longitude }); setLocError(''); },
+      (p) => {
+        setLocation({ lat: p.coords.latitude, lng: p.coords.longitude });
+        setLocError('');
+        pushTrack(p.coords);
+      },
       () => setLocError('Включите геолокацию'),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-    return () => navigator.geolocation.clearWatch(id);
-  }, []);
+
+    // Keep pinging even if watch is throttled (background best-effort)
+    const tick = setInterval(() => {
+      navigator.geolocation.getCurrentPosition(
+        (p) => {
+          setLocation({ lat: p.coords.latitude, lng: p.coords.longitude });
+          pushTrack(p.coords);
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 }
+      );
+    }, 20000);
+
+    try {
+      const w = window.Telegram?.WebApp;
+      if (w?.enableClosingConfirmation) w.enableClosingConfirmation();
+    } catch {}
+
+    return () => {
+      navigator.geolocation.clearWatch(id);
+      clearInterval(tick);
+    };
+  }, [user, userRole, userPhone]);
 
   // Real identity is automatic by phone.
   // Only directors can temporarily switch UI into driver / any manager view.
@@ -1332,8 +1401,18 @@ export default function Home() {
               )}
               <div style={location ? c.locOk : c.locBad}>
                 <PinIcon size={15} />
-                <span>{location ? 'Геолокация активна' : (locError || 'Определяем геопозицию...')}</span>
+                <span>
+                  {location
+                    ? `Геолокация активна${trackStatus ? ` · ${trackStatus}` : ' · 📡 трек директору'}`
+                    : (locError || 'Определяем геопозицию...')}
+                </span>
               </div>
+              {userRole === 'driver' && location && (
+                <div style={{ fontSize: 11, color: '#71717a', textAlign: 'center', marginBottom: 12, lineHeight: 1.4 }}>
+                  GPS уходит в дашборд директора в фоне (пока Mini App открыт / не убит системой).
+                  Для лучшего трека не закрывайте приложение полностью.
+                </div>
+              )}
 
               {step === 'choose' && (
                 <>
