@@ -18,3 +18,13 @@ body {
 input, button, select {
   font-family: inherit;
 }
+
+/* Desktop dashboard responsive */
+@media (max-width: 900px) {
+  /* stat grid stacks on smaller screens when using dashboard inline styles;
+     table remains horizontally scrollable */
+}
+
+a {
+  color: inherit;
+}

@@ -883,22 +883,42 @@ export default function Home() {
       {userRole === 'director' && (
         <div style={c.switcherContainer}>
           <div style={c.switcherLabel}>Режим (только директор):</div>
-          <select
-            style={c.switcherSelect}
-            value={viewOverride}
-            onChange={(e) => onDirectorViewChange(e.target.value)}
-          >
-            <option value="director">👑 Панель Директора</option>
-            <option value="driver">🚚 Режим Развозчика</option>
-            <optgroup label="Режим Управляющего">
-              {factory && (
-                <option value={`manager_${factory.id}`}>🏭 {factory.name}</option>
-              )}
-              {branches.map((b) => (
-                <option key={b.id} value={`manager_${b.id}`}>🏢 {b.name}</option>
-              ))}
-            </optgroup>
-          </select>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, justifyContent: 'flex-end' }}>
+            <a
+              href="/dashboard"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                padding: '7px 10px',
+                borderRadius: 8,
+                border: '1px solid #e4e4e7',
+                background: '#fff',
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#18181b',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🖥 Desktop
+            </a>
+            <select
+              style={c.switcherSelect}
+              value={viewOverride}
+              onChange={(e) => onDirectorViewChange(e.target.value)}
+            >
+              <option value="director">👑 Панель Директора</option>
+              <option value="driver">🚚 Режим Развозчика</option>
+              <optgroup label="Режим Управляющего">
+                {factory && (
+                  <option value={`manager_${factory.id}`}>🏭 {factory.name}</option>
+                )}
+                {branches.map((b) => (
+                  <option key={b.id} value={`manager_${b.id}`}>🏢 {b.name}</option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
         </div>
       )}
 
