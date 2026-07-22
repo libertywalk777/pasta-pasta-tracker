@@ -3,6 +3,7 @@ import { BRANCHES, FACTORY } from '@/lib/branches';
 import { haversine } from '@/lib/geo';
 import { getDb, initDb } from '@/lib/db';
 import { notifyManager } from '@/lib/bot';
+import { nowLocal } from '@/lib/time';
 
 let dbInitialized = false;
 
@@ -29,7 +30,11 @@ export async function POST(request) {
     }
 
     const distance = haversine(Number(lat), Number(lng), target.lat, target.lng);
-    const maxDist = Number(process.env.MAX_DISTANCE_METERS || 300);
+    const defaultMax = Number(process.env.MAX_DISTANCE_METERS || 300);
+    // Per-branch override (e.g. SeoulMun = 1000m), else global default
+    const maxDist = Number(
+      target.max_distance_meters != null ? target.max_distance_meters : defaultMax
+    );
 
     if (distance > maxDist) {
       return NextResponse.json({
@@ -41,7 +46,8 @@ export async function POST(request) {
       });
     }
 
-    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    // Asia/Tashkent wall clock (UTC+5) — not UTC
+    const now = nowLocal();
     const db = getDb();
 
     // 1) Always persist to Supabase first
@@ -84,6 +90,7 @@ export async function POST(request) {
       status: 'pending',
       type: deliveryType,
       created_at: now,
+      max_distance: maxDist,
       notified: notify.ok,
       notify_error: notify.ok ? null : notify.error || null,
     });

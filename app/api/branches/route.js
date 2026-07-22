@@ -11,6 +11,7 @@ export async function POST() {
       lng: b.lng,
       manager_username: b.manager_username,
       manager_phone: b.manager_phone || null,
+      max_distance_meters: b.max_distance_meters != null ? b.max_distance_meters : null,
     })),
     factory: {
       id: FACTORY.id,
@@ -20,6 +21,7 @@ export async function POST() {
       lng: FACTORY.lng,
       manager_username: FACTORY.manager_username,
       manager_phone: FACTORY.manager_phone || null,
+      max_distance_meters: FACTORY.max_distance_meters != null ? FACTORY.max_distance_meters : null,
     },
     driver: DRIVER,
     drivers: DRIVERS.map((d) => ({

@@ -36,8 +36,9 @@ export async function POST(request) {
     });
     stats.total = stats.confirmed + stats.rejected + stats.pending;
 
-    // Today stats (for dashboard subtitle)
-    const today = new Date().toISOString().slice(0, 10);
+    // Today stats in Asia/Tashkent (stored created_at is local wall clock)
+    const { todayLocal } = require('@/lib/time');
+    const today = todayLocal();
     const todayRes = await db.execute(
       'SELECT status, COUNT(*) as cnt FROM deliveries WHERE created_at LIKE ? GROUP BY status',
       [`${today}%`]

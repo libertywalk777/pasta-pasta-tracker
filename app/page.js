@@ -1293,10 +1293,18 @@ export default function Home() {
                     )}
 
                     <div style={c.pendingDistance}>
-                      📍 Дистанция: <strong>{d.distance} м</strong> от точки 
-                      {d.distance > 300 && (
-                        <span style={{ color: '#dc2626', marginLeft: 6, fontWeight: 700 }}>(Вне радиуса 300м!)</span>
-                      )}
+                      📍 Дистанция: <strong>{d.distance} м</strong> от точки
+                      {(() => {
+                        const maxM =
+                          managerActiveBranch?.max_distance_meters != null
+                            ? Number(managerActiveBranch.max_distance_meters)
+                            : 300;
+                        return d.distance > maxM ? (
+                          <span style={{ color: '#dc2626', marginLeft: 6, fontWeight: 700 }}>
+                            (Вне радиуса {maxM}м!)
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
 
                     {actionLoading === d.id ? (
